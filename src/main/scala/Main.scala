@@ -1,6 +1,7 @@
+import akka.NotUsed
 import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.{Compression, Source}
+import akka.stream.{ActorMaterializer, ClosedShape}
+import akka.stream.scaladsl.{Broadcast, Compression, GraphDSL, RunnableGraph, Sink, Source}
 import akka.util.ByteString
 import streams.Crypto
 
@@ -21,22 +22,31 @@ object Main {
       ByteString(" a file.")
     ))
 
+    val stringSink = Sink.fold[String, ByteString]("")(_ + _.utf8String)
+
     val key = Crypto.generateAesKey()
     val iv = Crypto.generateIv()
 
-    val compressEncryptDecryptResult = src
-      .via(Compression.gzip)
-      .via(Crypto.encryptAes(key, iv))
-      .via(Crypto.decryptAes(key, iv))
-      .via(Compression.gunzip())
-      .runFold("")(_ + _.utf8String)
+    val graph = RunnableGraph.fromGraph(GraphDSL.create(stringSink, stringSink)((_,_)) { implicit b => (sink1, sink2) =>
+      import GraphDSL.Implicits._
 
-    val sha256Result = src.via(Crypto.sha256).runFold("")(_ + _.utf8String)
+      val broadcast = b.add(Broadcast[ByteString](2))
+
+      src ~> Compression.gzip ~> Crypto.encryptAes(key, iv) ~> broadcast
+
+      broadcast ~> Crypto.decryptAes(key, iv) ~> Compression.gunzip() ~> sink1
+      broadcast ~> Crypto.sha256 ~> sink2
+
+      ClosedShape
+    })
+
+    val (enc, hash) = graph.run()
+
 
     println("GZIP -> Encrypt -> Decrypt -> GUNZIP")
-    println(Await.result(compressEncryptDecryptResult, Duration.Inf))
+    println(Await.result(enc, Duration.Inf))
     println("SHA-256")
-    println(Await.result(sha256Result, Duration.Inf))
+    println(Await.result(hash, Duration.Inf))
 
     sys.terminate()
   }
