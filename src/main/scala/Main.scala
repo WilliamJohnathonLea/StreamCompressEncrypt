@@ -14,7 +14,7 @@ object Main {
     implicit val sys = ActorSystem()
     implicit val mat = ActorMaterializer()
 
-    val src = Source(List(
+    def src = Source(List(
       ByteString("Hello, world!"),
       ByteString(" This is a"),
       ByteString(" quick test for encrypting"),
@@ -24,13 +24,19 @@ object Main {
     val key = Crypto.generateAesKey()
     val iv = Crypto.generateIv()
 
-    val result = src.via(Compression.gzip)
+    val compressEncryptDecryptResult = src
+      .via(Compression.gzip)
       .via(Crypto.encryptAes(key, iv))
       .via(Crypto.decryptAes(key, iv))
       .via(Compression.gunzip())
       .runFold("")(_ + _.utf8String)
 
-    println(Await.result(result, Duration.Inf))
+    val sha256Result = src.via(Crypto.sha256).runFold("")(_ + _.utf8String)
+
+    println("GZIP -> Encrypt -> Decrypt -> GUNZIP")
+    println(Await.result(compressEncryptDecryptResult, Duration.Inf))
+    println("SHA-256")
+    println(Await.result(sha256Result, Duration.Inf))
 
     sys.terminate()
   }
