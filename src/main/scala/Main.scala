@@ -1,4 +1,3 @@
-import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.stream.{ActorMaterializer, ClosedShape}
 import akka.stream.scaladsl.{Broadcast, Compression, GraphDSL, RunnableGraph, Sink, Source}
@@ -12,8 +11,8 @@ object Main {
 
   def main(args: Array[String]): Unit = {
 
-    implicit val sys = ActorSystem()
-    implicit val mat = ActorMaterializer()
+    implicit val sys: ActorSystem = ActorSystem()
+    implicit val mat: ActorMaterializer = ActorMaterializer()
 
     def src = Source(List(
       ByteString("Hello, world!"),
@@ -27,26 +26,30 @@ object Main {
     val key = Crypto.generateAesKey()
     val iv = Crypto.generateIv()
 
-    val graph = RunnableGraph.fromGraph(GraphDSL.create(stringSink, stringSink)((_,_)) { implicit b => (sink1, sink2) =>
-      import GraphDSL.Implicits._
+    val graph = RunnableGraph.fromGraph(GraphDSL.create(stringSink, stringSink, stringSink)((_,_,_)) { implicit b =>
+      (textSink, sha256Sink, md5Sink) =>
+        import GraphDSL.Implicits._
 
-      val broadcast = b.add(Broadcast[ByteString](2))
+        val broadcast = b.add(Broadcast[ByteString](3))
 
-      src ~> Compression.gzip ~> Crypto.encryptAes(key, iv) ~> broadcast
+        src ~> Compression.gzip ~> Crypto.encryptAes(key, iv) ~> broadcast
 
-      broadcast ~> Crypto.decryptAes(key, iv) ~> Compression.gunzip() ~> sink1
-      broadcast ~> Crypto.sha256 ~> sink2
+        broadcast ~> Crypto.decryptAes(key, iv) ~> Compression.gunzip() ~> textSink
+        broadcast ~> Crypto.sha256 ~> sha256Sink
+        broadcast ~> Crypto.md5 ~> md5Sink
 
-      ClosedShape
+        ClosedShape
     })
 
-    val (enc, hash) = graph.run()
+    val (enc, sha256, md5) = graph.run()
 
 
     println("GZIP -> Encrypt -> Decrypt -> GUNZIP")
     println(Await.result(enc, Duration.Inf))
     println("SHA-256")
-    println(Await.result(hash, Duration.Inf))
+    println(Await.result(sha256, Duration.Inf))
+    println("MD5")
+    println(Await.result(md5, Duration.Inf))
 
     sys.terminate()
   }

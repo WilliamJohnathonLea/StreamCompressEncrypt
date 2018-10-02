@@ -8,6 +8,7 @@ import java.security.{MessageDigest, SecureRandom}
 
 import javax.crypto._
 import javax.crypto.spec.{IvParameterSpec, SecretKeySpec}
+import javax.xml.bind.DatatypeConverter
 
 /**
   * Based on Gist https://gist.github.com/TimothyKlim/ec5889aa23400529fd5e
@@ -42,6 +43,11 @@ object Crypto {
   def sha256(implicit mat: Materializer): Flow[ByteString, ByteString, _] = {
     val digest = MessageDigest.getInstance("SHA-256")
     Flow.fromGraph(new Sha256Stage(digest))
+  }
+
+  def md5(implicit mat: Materializer): Flow[ByteString, ByteString, _] = {
+    val digest = MessageDigest.getInstance("MD5")
+    Flow.fromGraph(new MD5Stage(digest))
   }
 
   private def aesCipher(mode: Int, keyBytes: Array[Byte], ivBytes: Array[Byte]): Cipher = {
@@ -107,6 +113,38 @@ private[this] class Sha256Stage(messageDigest: MessageDigest) extends GraphStage
           }.mkString("")
           val bs = ByteString(hash)
           if (bs.nonEmpty) emit(out, bs)
+          complete(out)
+        }
+      })
+
+      setHandler(out, new OutHandler {
+        override def onPull(): Unit = {
+          pull(in)
+        }
+      })
+    }
+
+}
+
+private[this] class MD5Stage(messageDigest: MessageDigest) extends GraphStage[FlowShape[ByteString, ByteString]] {
+  val in: Inlet[ByteString] = Inlet[ByteString]("in")
+  val out: Outlet[ByteString] = Outlet[ByteString]("out")
+
+  override val shape: FlowShape[ByteString, ByteString] = FlowShape.of(in, out)
+
+  override def createLogic(inheritedAttributes: Attributes): GraphStageLogic =
+    new GraphStageLogic(shape) {
+      setHandler(in, new InHandler {
+        override def onPush(): Unit = {
+          val bs = grab(in)
+          if (bs.nonEmpty) messageDigest.update(bs.asByteBuffer)
+          push(out, ByteString.empty)
+        }
+
+        override def onUpstreamFinish(): Unit = {
+          val hashBytes = messageDigest.digest()
+          val hash = DatatypeConverter.printHexBinary(hashBytes)
+          if(hash.nonEmpty) emit(out, ByteString(hash))
           complete(out)
         }
       })
