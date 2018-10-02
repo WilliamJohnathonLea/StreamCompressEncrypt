@@ -18,25 +18,24 @@ object Crypto {
 
   private val rand = new SecureRandom()
 
-  def generateAesKey(): SecretKeySpec = {
+  def generateAesKey(): Array[Byte] = {
     val gen = KeyGenerator.getInstance("AES")
     gen.init(aesKeySize)
     val key = gen.generateKey()
-    val aesKey = key.getEncoded
-    aesKeySpec(aesKey)
+    key.getEncoded
   }
 
   def generateIv(): Array[Byte] = rand.generateSeed(16)
 
-  def encryptAes(keySpec: SecretKeySpec, ivBytes: Array[Byte])
+  def encryptAes(keyBytes: Array[Byte], ivBytes: Array[Byte])
                 (implicit mat: Materializer): Flow[ByteString, ByteString, _] = {
-    val cipher = aesCipher(Cipher.ENCRYPT_MODE, keySpec, ivBytes)
+    val cipher = aesCipher(Cipher.ENCRYPT_MODE, keyBytes, ivBytes)
     Flow.fromGraph(new AesStage(cipher))
   }
 
-  def decryptAes(keySpec: SecretKeySpec, ivBytes: Array[Byte])
+  def decryptAes(keyBytes: Array[Byte], ivBytes: Array[Byte])
                 (implicit mat: Materializer): Flow[ByteString, ByteString, _] = {
-    val cipher = aesCipher(Cipher.DECRYPT_MODE, keySpec, ivBytes)
+    val cipher = aesCipher(Cipher.DECRYPT_MODE, keyBytes, ivBytes)
     Flow.fromGraph(new AesStage(cipher))
   }
 
@@ -45,10 +44,9 @@ object Crypto {
     Flow.fromGraph(new Sha256Stage(digest))
   }
 
-  private def aesKeySpec(key: Array[Byte]) = new SecretKeySpec(key, "AES")
-
-  private def aesCipher(mode: Int, keySpec: SecretKeySpec, ivBytes: Array[Byte]) = {
+  private def aesCipher(mode: Int, keyBytes: Array[Byte], ivBytes: Array[Byte]): Cipher = {
     val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+    val keySpec = new SecretKeySpec(keyBytes, "AES")
     val ivSpec = new IvParameterSpec(ivBytes)
     cipher.init(mode, keySpec, ivSpec)
     cipher
